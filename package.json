@@ -2,7 +2,7 @@
   "name": "@ansvar/italian-competition-mcp",
   "version": "0.1.0",
   "mcpName": "eu.ansvar/italian-competition-mcp",
-  "description": "AGCM (Autorita Garante della Concorrenza e del Mercato) MCP server \u2014 competition law decisions, merger control, and sector enforcement",
+  "description": "AGCM (Autorita Garante della Concorrenza e del Mercato) MCP server — competition law decisions, merger control, and sector enforcement",
   "type": "module",
   "main": "dist/src/index.js",
   "bin": {
@@ -44,6 +44,7 @@
     "dev": "tsx src/http-server.ts",
     "start": "node dist/src/http-server.js",
     "seed": "npx tsx scripts/seed-sample.ts",
+    "ingest": "npx tsx scripts/ingest-agcm.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "tsc --noEmit"
   },
@@ -56,6 +57,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "better-sqlite3": "^9.4.3",
+    "cheerio": "^1.2.0",
     "zod": "^3.22.4"
   }
 }
