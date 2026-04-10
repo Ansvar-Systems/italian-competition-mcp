@@ -1,0 +1,84 @@
+# =============================================================================
+# Ingest AGCM Data — Manually triggered ingest from AGCM website
+# =============================================================================
+#
+# Manually triggered via workflow_dispatch. Runs 'npm run ingest' to
+# crawl https://www.agcm.it/ and populate the SQLite database.
+#
+# After a successful ingest the updated database and ingest-state.json
+# are committed back to the repository (if there were changes).
+#
+# =============================================================================
+
+name: Ingest AGCM Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      flags:
+        description: "Extra flags for ingest-agcm.ts (e.g. --dry-run, --decisions-only, --max-pages 5)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  ingest:
+    name: Run AGCM ingest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ingest
+        run: npm run ingest -- ${{ inputs.flags }}
+        env:
+          AGCM_DB_PATH: data/agcm.db
+
+      - name: Show ingest state
+        run: |
+          echo "=== data/ingest-state.json ==="
+          cat data/ingest-state.json
+
+      - name: Commit updated data
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add data/ingest-state.json
+          # Include the database only if it is tracked (not gitignored)
+          git add data/agcm.db 2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore(data): refresh AGCM ingest $(date -u +%Y-%m-%d)"
+            git push
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## AGCM Ingest" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f data/ingest-state.json ]; then
+            DECISIONS=$(jq -r '.decisionsIngested // 0' data/ingest-state.json)
+            MERGERS=$(jq -r '.mergersIngested // 0' data/ingest-state.json)
+            LAST_RUN=$(jq -r '.lastRun // "unknown"' data/ingest-state.json)
+            echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Last run | $LAST_RUN |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Decisions ingested | $DECISIONS |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Mergers ingested | $MERGERS |" >> "$GITHUB_STEP_SUMMARY"
+          fi
