@@ -1,0 +1,130 @@
+# =============================================================================
+# Check Data Freshness — Verify AGCM ingest-state.json is not stale
+# =============================================================================
+#
+# Runs weekly on Monday at 08:00 UTC. Fails the job and creates a GitHub
+# issue (or notifies) if the data has not been refreshed in over 30 days.
+# Also runnable manually via workflow_dispatch.
+#
+# =============================================================================
+
+name: Check Data Freshness
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"   # Every Monday at 08:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-freshness:
+    name: Check ingest-state.json freshness
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check data freshness
+        id: freshness
+        run: |
+          INGEST_STATE="data/ingest-state.json"
+
+          if [ ! -f "$INGEST_STATE" ]; then
+            echo "ERROR: $INGEST_STATE not found"
+            echo "status=missing" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          LAST_RUN=$(jq -r '.lastRun // empty' "$INGEST_STATE")
+          DECISIONS=$(jq -r '.decisionsIngested // 0' "$INGEST_STATE")
+          MERGERS=$(jq -r '.mergersIngested // 0' "$INGEST_STATE")
+
+          if [ -z "$LAST_RUN" ]; then
+            echo "ERROR: lastRun field missing from $INGEST_STATE"
+            echo "status=invalid" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          LAST_RUN_EPOCH=$(date -d "$LAST_RUN" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S" "${LAST_RUN%.*}" +%s 2>/dev/null || echo 0)
+          NOW_EPOCH=$(date +%s)
+          AGE_DAYS=$(( (NOW_EPOCH - LAST_RUN_EPOCH) / 86400 ))
+
+          echo "Last run: $LAST_RUN ($AGE_DAYS days ago)"
+          echo "Decisions ingested: $DECISIONS"
+          echo "Mergers ingested: $MERGERS"
+          echo "age_days=$AGE_DAYS" >> "$GITHUB_OUTPUT"
+          echo "last_run=$LAST_RUN" >> "$GITHUB_OUTPUT"
+          echo "decisions=$DECISIONS" >> "$GITHUB_OUTPUT"
+          echo "mergers=$MERGERS" >> "$GITHUB_OUTPUT"
+
+          if [ "$AGE_DAYS" -gt 30 ]; then
+            echo "status=stale" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=current" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create stale-data issue
+        if: steps.freshness.outputs.status == 'stale'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const ageDays = '${{ steps.freshness.outputs.age_days }}';
+            const lastRun = '${{ steps.freshness.outputs.last_run }}';
+            const decisions = '${{ steps.freshness.outputs.decisions }}';
+            const mergers = '${{ steps.freshness.outputs.mergers }}';
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'stale-data',
+              state: 'open',
+            });
+
+            if (existing.data.length > 0) {
+              console.log('Stale data issue already open, skipping creation.');
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Data Freshness] AGCM data is stale (${ageDays} days since last ingest)`,
+              body: [
+                '## Data Freshness Alert',
+                '',
+                `The AGCM dataset has not been refreshed in **${ageDays} days** (threshold: 30 days).`,
+                '',
+                '| Field | Value |',
+                '|-------|-------|',
+                `| Last run | \`${lastRun}\` |`,
+                `| Decisions ingested | ${decisions} |`,
+                `| Mergers ingested | ${mergers} |`,
+                '',
+                '## Action Required',
+                '',
+                'Run the ingest workflow or execute locally:',
+                '```',
+                'npm run ingest',
+                '```',
+                '',
+                'Or trigger the [Ingest AGCM Data](../actions/workflows/ingest.yml) workflow manually.',
+              ].join('\n'),
+              labels: ['stale-data', 'data-quality'],
+            });
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Data Freshness Check" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Status | ${{ steps.freshness.outputs.status }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Last run | ${{ steps.freshness.outputs.last_run }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Age (days) | ${{ steps.freshness.outputs.age_days }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Decisions | ${{ steps.freshness.outputs.decisions }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Mergers | ${{ steps.freshness.outputs.mergers }} |" >> "$GITHUB_STEP_SUMMARY"

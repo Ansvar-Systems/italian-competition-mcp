@@ -58,7 +58,7 @@ This project follows security best practices:
 
 - All database queries use prepared statements (no SQL injection)
 - Input validation on all user-provided parameters
-- Read-only database access (no write operations at runtime)
+- Database accessed through prepared statements only (no dynamic SQL)
 - No execution of user-provided code
 - Automated security testing in CI/CD
 - Regular dependency updates via Dependabot
@@ -69,7 +69,7 @@ This project follows security best practices:
 
 The regulatory database is:
 - Pre-built and version-controlled (tamper evident)
-- Opened in read-only mode at runtime (no write risk)
+- Accessed via prepared statements with no user-controlled SQL
 - Source data from official regulatory authorities (auditable)
 - Ingestion scripts require manual execution (no auto-download at runtime)
 

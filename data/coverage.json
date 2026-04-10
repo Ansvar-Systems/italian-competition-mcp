@@ -1,0 +1,46 @@
+{
+  "authority": "AGCM",
+  "authority_full": "Autorita Garante della Concorrenza e del Mercato",
+  "jurisdiction": "Italy",
+  "legal_basis": "Legge n. 287/1990",
+  "source_url": "https://www.agcm.it/",
+  "corpus": [
+    {
+      "type": "enforcement_decisions",
+      "table": "decisions",
+      "case_prefixes": ["A", "I", "IC", "PS"],
+      "description": "Abuse of dominance, cartel, sector inquiries, and consumer protection cases",
+      "date_range_start": "1990-01-01",
+      "date_range_end": null,
+      "completeness": "partial"
+    },
+    {
+      "type": "merger_control",
+      "table": "mergers",
+      "case_prefixes": ["C"],
+      "description": "Phase I and Phase II merger control decisions under Legge 287/1990 Articles 16-19",
+      "date_range_start": "1990-01-01",
+      "date_range_end": null,
+      "completeness": "partial"
+    }
+  ],
+  "sectors": [
+    "digitale",
+    "energia",
+    "grande_distribuzione",
+    "servizi_finanziari",
+    "farmaceutico",
+    "telecomunicazioni",
+    "media",
+    "automotive"
+  ],
+  "out_of_scope": [
+    "Regional Italian courts",
+    "EU Commission DG COMP exclusive jurisdiction cases",
+    "AGCOM sector regulation",
+    "ARERA energy sector regulation",
+    "IVASS insurance regulation"
+  ],
+  "ingest_state_path": "data/ingest-state.json",
+  "last_checked": "2026-04-10"
+}

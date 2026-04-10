@@ -30,12 +30,22 @@ import {
   getMerger,
   listSectors,
 } from "./db.js";
+import { buildCitation } from "./utils/citation.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const PORT = parseInt(process.env["PORT"] ?? "3000", 10);
 const SERVER_NAME = "italian-competition-mcp";
+const DATA_AGE = "2026-03-23";
+
+const META = {
+  disclaimer:
+    "This information is for research purposes only and does not constitute legal advice. Always verify with official AGCM publications.",
+  data_age: DATA_AGE,
+  copyright: "Autorita Garante della Concorrenza e del Mercato (AGCM)",
+  source_url: "https://www.agcm.it/",
+};
 
 let pkgVersion = "0.1.0";
 try {
@@ -53,11 +63,11 @@ const TOOLS = [
   {
     name: "it_comp_search_decisions",
     description:
-      "Full-text search across AGCM enforcement decisions (abuse of dominance, cartel, sector inquiries). Returns matching decisions with case number, parties, outcome, fine amount, and GWB articles cited.",
+      "Full-text search across AGCM enforcement decisions (abuse of dominance, cartel, sector inquiries). Returns matching decisions with case number, parties, outcome, fine amount, and Legge 287/1990 articles cited.",
     inputSchema: {
       type: "object" as const,
       properties: {
-        query: { type: "string", description: "Search query (e.g., 'Marktmissbrauch', 'Facebook', 'Preisabsprache')" },
+        query: { type: "string", description: "Search query (e.g., 'intesa anticoncorrenziale', 'abuso di posizione dominante', 'concentrazione')" },
         type: {
           type: "string",
           enum: ["abuse_of_dominance", "cartel", "merger", "sector_inquiry"],
@@ -77,11 +87,11 @@ const TOOLS = [
   {
     name: "it_comp_get_decision",
     description:
-      "Get a specific Bundeskartellamt decision by case number (e.g., 'B6-22/16').",
+      "Get a specific AGCM decision by case number (e.g., 'A555', 'C12345').",
     inputSchema: {
       type: "object" as const,
       properties: {
-        case_number: { type: "string", description: "Case number (e.g., 'B6-22/16', 'B2-94/12')" },
+        case_number: { type: "string", description: "AGCM case number (e.g., 'A555', 'C12345')" },
       },
       required: ["case_number"],
     },
@@ -93,7 +103,7 @@ const TOOLS = [
     inputSchema: {
       type: "object" as const,
       properties: {
-        query: { type: "string", description: "Search query (e.g., 'Vonovia', 'Energieversorgung')" },
+        query: { type: "string", description: "Search query (e.g., 'Mediaset', 'Enel')" },
         sector: { type: "string", description: "Filter by sector ID. Optional." },
         outcome: {
           type: "string",
@@ -108,11 +118,11 @@ const TOOLS = [
   {
     name: "it_comp_get_merger",
     description:
-      "Get a specific merger control decision by case number (e.g., 'B1-35/21').",
+      "Get a specific AGCM merger control decision by case number (e.g., 'C12345').",
     inputSchema: {
       type: "object" as const,
       properties: {
-        case_number: { type: "string", description: "Merger case number (e.g., 'B1-35/21')" },
+        case_number: { type: "string", description: "AGCM merger case number (e.g., 'C12345')" },
       },
       required: ["case_number"],
     },
@@ -127,6 +137,18 @@ const TOOLS = [
     name: "it_comp_about",
     description:
       "Return metadata about this MCP server: version, data source, coverage, and tool list.",
+    inputSchema: { type: "object" as const, properties: {}, required: [] },
+  },
+  {
+    name: "it_comp_list_sources",
+    description:
+      "List the data sources used by this MCP server.",
+    inputSchema: { type: "object" as const, properties: {}, required: [] },
+  },
+  {
+    name: "it_comp_check_data_freshness",
+    description:
+      "Check when the AGCM data was last updated and whether it is current or stale.",
     inputSchema: { type: "object" as const, properties: {}, required: [] },
   },
 ];
@@ -172,14 +194,30 @@ function createMcpServer(): Server {
     const { name, arguments: args = {} } = request.params;
 
     function textContent(data: unknown) {
+      const payload =
+        typeof data === "object" && data !== null
+          ? { ...(data as Record<string, unknown>), _meta: META }
+          : { data, _meta: META };
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
       };
     }
 
-    function errorContent(message: string) {
+    function errorContent(
+      message: string,
+      errorType: "not_found" | "internal_error" = "internal_error",
+    ) {
       return {
-        content: [{ type: "text" as const, text: message }],
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              { error: message, _error_type: errorType, _meta: META },
+              null,
+              2,
+            ),
+          },
+        ],
         isError: true as const,
       };
     }
@@ -195,16 +233,36 @@ function createMcpServer(): Server {
             outcome: parsed.outcome,
             limit: parsed.limit,
           });
-          return textContent({ results, count: results.length });
+          return textContent({
+            results: results.map((r) => ({
+              ...r,
+              _citation: buildCitation(
+                r.case_number,
+                r.title,
+                "it_comp_get_decision",
+                { case_number: r.case_number },
+              ),
+            })),
+            count: results.length,
+          });
         }
 
         case "it_comp_get_decision": {
           const parsed = GetDecisionArgs.parse(args);
           const decision = getDecision(parsed.case_number);
           if (!decision) {
-            return errorContent(`Decision not found: ${parsed.case_number}`);
+            return errorContent(`Decision not found: ${parsed.case_number}`, "not_found");
           }
-          return textContent(decision);
+          const dec = decision as Record<string, unknown>;
+          return textContent({
+            ...decision,
+            _citation: buildCitation(
+              String(dec.case_number ?? parsed.case_number),
+              String(dec.title ?? dec.case_number ?? parsed.case_number),
+              "it_comp_get_decision",
+              { case_number: parsed.case_number },
+            ),
+          });
         }
 
         case "it_comp_search_mergers": {
@@ -215,16 +273,36 @@ function createMcpServer(): Server {
             outcome: parsed.outcome,
             limit: parsed.limit,
           });
-          return textContent({ results, count: results.length });
+          return textContent({
+            results: results.map((r) => ({
+              ...r,
+              _citation: buildCitation(
+                r.case_number,
+                r.title,
+                "it_comp_get_merger",
+                { case_number: r.case_number },
+              ),
+            })),
+            count: results.length,
+          });
         }
 
         case "it_comp_get_merger": {
           const parsed = GetMergerArgs.parse(args);
           const merger = getMerger(parsed.case_number);
           if (!merger) {
-            return errorContent(`Merger case not found: ${parsed.case_number}`);
+            return errorContent(`Merger case not found: ${parsed.case_number}`, "not_found");
           }
-          return textContent(merger);
+          const mrg = merger as Record<string, unknown>;
+          return textContent({
+            ...merger,
+            _citation: buildCitation(
+              String(mrg.case_number ?? parsed.case_number),
+              String(mrg.title ?? mrg.case_number ?? parsed.case_number),
+              "it_comp_get_merger",
+              { case_number: parsed.case_number },
+            ),
+          });
         }
 
         case "it_comp_list_sectors": {
@@ -243,12 +321,40 @@ function createMcpServer(): Server {
           });
         }
 
+        case "it_comp_list_sources": {
+          return textContent({
+            sources: [
+              {
+                name: "AGCM",
+                url: "https://www.agcm.it/",
+                description:
+                  "Autorita Garante della Concorrenza e del Mercato — Italian competition authority publishing enforcement decisions and merger control rulings under Legge n. 287/1990.",
+              },
+            ],
+          });
+        }
+
+        case "it_comp_check_data_freshness": {
+          const lastUpdated = new Date(DATA_AGE);
+          const now = new Date();
+          const diffDays = Math.floor(
+            (now.getTime() - lastUpdated.getTime()) / (1000 * 60 * 60 * 24),
+          );
+          const status = diffDays > 30 ? "stale" : "current";
+          return textContent({
+            last_updated: DATA_AGE,
+            source: "AGCM",
+            status,
+            age_days: diffDays,
+          });
+        }
+
         default:
           return errorContent(`Unknown tool: ${name}`);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return errorContent(`Error executing ${name}: ${message}`);
+      return errorContent(`Error executing ${name}: ${message}`, "internal_error");
     }
   });
 
